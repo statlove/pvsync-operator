@@ -4,11 +4,9 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"time"
-	pvcontroller "github.com/statlove/pvsync-operator/internal/controller"
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	pvcontroller "github.com/statlove/pvsync-operator/internal/controller"
+	"github.com/karmada-io/karmada/pkg/sharedcli/ratelimiterflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -17,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
@@ -43,17 +42,13 @@ func main() {
 	flag.BoolVar(&secureMetrics, "metrics-secure", false, "Serve metrics securely.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false, "Enable HTTP/2")
 
-	opts := zap.Options{
-		Development: true,
-	}
+	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, func(c *tls.Config) {
-			setupLog.Info("disabling http/2")
 			c.NextProtos = []string{"http/1.1"}
 		})
 	}
@@ -84,21 +79,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create and register the controller
+	ctx := ctrl.SetupSignalHandler()
+
 	controller := &pvcontroller.PVSyncController{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
+		StopChan:           ctx.Done(),
 		WorkerNumber:       2,
-		StopChan:           ctrl.SetupSignalHandler(),
-		PredicateFunc:      ctrl.PredicateFuncs{}, // default predicate, customize if needed
-		RateLimiterOptions: pvcontroller.RateLimiterOptions, // provide appropriate options
+		PredicateFunc:      predicate.NewPredicateFuncs(func(o client.Object) bool { return true }),
+		RateLimiterOptions: ratelimiterflag.Options{},
 	}
 	if err := controller.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVSync")
 		os.Exit(1)
 	}
-
-	// Run the custom async worker
 	go controller.RunWorkQueue()
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -111,7 +105,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

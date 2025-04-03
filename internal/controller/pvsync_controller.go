@@ -19,22 +19,19 @@ package controller
 import (
 	"context"
 	"fmt"
+
 	//"reflect"
 	//"strings"
 	//"sync"
 
-    	corev1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	//discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	//"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -42,26 +39,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
-	networkingv1alpha1 "github.com/karmada-io/karmada/pkg/apis/networking/v1alpha1"
 	workv1alpha1 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha1"
 	"github.com/karmada-io/karmada/pkg/controllers/ctrlutil"
 	"github.com/karmada-io/karmada/pkg/sharedcli/ratelimiterflag"
 	"github.com/karmada-io/karmada/pkg/util"
-	"github.com/karmada-io/karmada/pkg/util/fedinformer"
-	"github.com/karmada-io/karmada/pkg/util/fedinformer/genericmanager"
 	"github.com/karmada-io/karmada/pkg/util/fedinformer/keys"
 	"github.com/karmada-io/karmada/pkg/util/helper"
 	"github.com/karmada-io/karmada/pkg/util/names"
 )
 
 var (
-    StatefulSetGVK = schema.GroupVersionKind{
-        Group:   "apps",
-        Version: "v1",
-        Kind:    "StatefulSet",
-    }
+	StatefulSetGVK = schema.GroupVersionKind{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "StatefulSet",
+	}
 )
+
 const PVSyncControllerName = "pv-sync-controller"
 
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs,verbs=get;list;watch;create;update;patch;delete
@@ -75,11 +69,12 @@ type PVSyncController struct {
 	StopChan           <-chan struct{}
 	PredicateFunc      predicate.Predicate
 	RateLimiterOptions ratelimiterflag.Options
+	worker             *util.AsyncWorker // 추가
 }
 
-//ms: Refer to the reconcile code of endpointsliceCollectController
-//ms: mainly referenced the overall part
-//ms: The parts that have been changed in detail are the part that checks GVK within the work, the part that creates and registers informers, and the logic that collects PV information.
+// ms: Refer to the reconcile code of endpointsliceCollectController
+// ms: mainly referenced the overall part
+// ms: The parts that have been changed in detail are the part that checks GVK within the work, the part that creates and registers informers, and the logic that collects PV information.
 func (c *PVSyncController) Reconcile(ctx context.Context, req controllerruntime.Request) (controllerruntime.Result, error) {
 	klog.V(4).Infof("Reconciling Work %s", req.NamespacedName.String())
 
@@ -107,6 +102,7 @@ func (c *PVSyncController) Reconcile(ctx context.Context, req controllerruntime.
 
 	return controllerruntime.Result{}, nil
 }
+
 // SetupWithManager creates a controller and register to controller manager.
 func (c *PVSyncController) SetupWithManager(mgr controllerruntime.Manager) error {
 	return controllerruntime.NewControllerManagedBy(mgr).
@@ -115,6 +111,7 @@ func (c *PVSyncController) SetupWithManager(mgr controllerruntime.Manager) error
 		WithOptions(controller.Options{RateLimiter: ratelimiterflag.DefaultControllerRateLimiter[controllerruntime.Request](c.RateLimiterOptions)}).
 		Complete(c)
 }
+
 // RunWorkQueue initializes worker and run it, worker will process resource asynchronously.
 func (c *PVSyncController) RunWorkQueue() {
 	workerOptions := util.Options{
@@ -136,21 +133,21 @@ func (c *PVSyncController) collectPersistentVolume(key util.QueueKey) error {
 
 	klog.V(4).Infof("Begin to collect persistentvolume %s.", fedKey.Name) //ms: PV is the cluster level resource so that just using fedkey.Name is okay.
 	var pv corev1.PersistentVolume
-    if err := c.Client.Get(ctx, types.NamespacedName{Name: fedKey.Name}, &pv); err != nil {
-	    klog.Errorf("Failed to get PersistentVolume %s: %v", fedKey.Name, err)
-	    return err
-    }
+	if err := c.Client.Get(ctx, types.NamespacedName{Name: fedKey.Name}, &pv); err != nil {
+		klog.Errorf("Failed to get PersistentVolume %s: %v", fedKey.Name, err)
+		return err
+	}
 
-    return reportPersistentVolume(ctx, c.Client, &pv, fedKey.Cluster)
+	return reportPersistentVolume(ctx, c.Client, &pv, fedKey.Cluster)
 }
 
-//ms: reportPersistentVolume report PersistentVolume to control-plane.
+// ms: reportPersistentVolume report PersistentVolume to control-plane.
 func reportPersistentVolume(ctx context.Context, c client.Client, pv *corev1.PersistentVolume, clusterName string) error {
 	executionSpace := names.GenerateExecutionSpaceName(clusterName)
 	workName := names.GenerateWorkName("PersistentVolume", pv.Name, "") //ms: PV is cluster-scoped resource. so, no namespace.
 
-    //ms: Convert to Unstructured -> 이 부분은 확실히 필요한지 다시 한번 확인
-    unstructuredPV, err := helper.ToUnstructured(pv)
+	//ms: Convert to Unstructured -> 이 부분은 확실히 필요한지 다시 한번 확인
+	unstructuredPV, err := helper.ToUnstructured(pv)
 	if err != nil {
 		klog.Errorf("Failed to convert PersistentVolume %s to unstructured, error: %v", pv.Name, err)
 		return err
@@ -170,9 +167,9 @@ func reportPersistentVolume(ctx context.Context, c client.Client, pv *corev1.Per
 	return nil
 }
 
-//ms: read PV info and make them into metadata that used by reportPersistentVolume to report to control-plane
+// ms: read PV info and make them into metadata that used by reportPersistentVolume to report to control-plane
 func getPersistentVolumeWorkMeta(ctx context.Context, c client.Client, ns string, workName string, pv *corev1.PersistentVolume) (metav1.ObjectMeta, error) {
-    existWork := &workv1alpha1.Work{}
+	existWork := &workv1alpha1.Work{}
 	var err error
 	if err = c.Get(ctx, types.NamespacedName{
 		Namespace: ns,
@@ -218,4 +215,3 @@ func getPersistentVolumeWorkMeta(ctx context.Context, c client.Client, ns string
 		Finalizers: []string{"pv.karmada.io/finalizer"}, //ms: optional
 	}, nil
 }
-

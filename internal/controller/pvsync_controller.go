@@ -19,8 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
-
 	//"reflect"
 	//"strings"
 	//"sync"
@@ -45,7 +43,6 @@ import (
 	"github.com/karmada-io/karmada/pkg/util/fedinformer/keys"
 	"github.com/karmada-io/karmada/pkg/util/helper"
 	"github.com/karmada-io/karmada/pkg/util/names"
-	"github.com/karmada-io/karmada/pkg/util/fedinformer/genericmanager"
 )
 
 var (

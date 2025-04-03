@@ -5,7 +5,6 @@ import (
 	"flag"
 	"os"
 	"time"
-
 	pvcontroller "github.com/statlove/pvsync-operator/internal/controller"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	_ "k8s.io/client-go/plugin/pkg/client/auth"

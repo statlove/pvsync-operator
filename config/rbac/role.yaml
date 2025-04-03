@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - dcn.dcn.karmada.io
+  resources:
+  - pvsyncs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dcn.dcn.karmada.io
+  resources:
+  - pvsyncs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dcn.dcn.karmada.io
+  resources:
+  - pvsyncs/status
+  verbs:
+  - get
+  - patch
+  - update

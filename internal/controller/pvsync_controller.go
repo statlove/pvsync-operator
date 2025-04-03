@@ -62,6 +62,7 @@ const PVSyncControllerName = "pv-sync-controller"
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/finalizers,verbs=update
 
+//ms: add controller structure
 type PVSyncController struct {
 	client.Client
 	Scheme             *runtime.Scheme
@@ -69,7 +70,7 @@ type PVSyncController struct {
 	StopChan           <-chan struct{}
 	PredicateFunc      predicate.Predicate
 	RateLimiterOptions ratelimiterflag.Options
-	worker             *util.AsyncWorker // 추가
+	worker             util.AsyncWorker //ms: modify
 }
 
 // ms: Refer to the reconcile code of endpointsliceCollectController
@@ -93,12 +94,12 @@ func (c *PVSyncController) Reconcile(ctx context.Context, req controllerruntime.
 	if !work.DeletionTimestamp.IsZero() {
 		return controllerruntime.Result{}, nil
 	}
-
-	clusterName, err := names.GetClusterName(work.Namespace) //ms: save this code because of we can get the name cluster where sts was deployed from this code
-	if err != nil {
-		klog.Errorf("Failed to get cluster name for work %s/%s", work.Namespace, work.Name)
-		return controllerruntime.Result{}, err
-	}
+	//ms: no need to use
+	//clusterName, err := names.GetClusterName(work.Namespace) //ms: save this code because of we can get the name cluster where sts was deployed from this code
+	//if err != nil {
+	//	klog.Errorf("Failed to get cluster name for work %s/%s", work.Namespace, work.Name)
+	//	return controllerruntime.Result{}, err
+	//}
 
 	return controllerruntime.Result{}, nil
 }

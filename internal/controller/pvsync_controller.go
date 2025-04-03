@@ -59,7 +59,7 @@ const PVSyncControllerName = "pv-sync-controller"
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/finalizers,verbs=update
 
-//ms: add controller structure
+// ms: add controller structure
 type PVSyncController struct {
 	client.Client
 	Scheme             *runtime.Scheme

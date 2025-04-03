@@ -3,13 +3,13 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"os"
-
-	pvcontroller "github.com/statlove/pvsync-operator/internal/controller"
+	workv1alpha1 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha1"
 	"github.com/karmada-io/karmada/pkg/sharedcli/ratelimiterflag"
+	pvcontroller "github.com/statlove/pvsync-operator/internal/controller"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -27,6 +27,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(workv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -111,4 +112,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

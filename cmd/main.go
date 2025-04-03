@@ -21,10 +21,8 @@ import (
 	"flag"
 	"os"
 	"time"
-	//pvcontroller "github.com/statlove/pvsync-operator/internal/controller" //ms: adding
+	pvcontroller "github.com/statlove/pvsync-operator/internal/controller" //ms: adding
 	"github.com/karmada-io/karmada/pkg/util/fedinformer/genericmanager" //ms: adding
-	"k8s.io/apimachinery/pkg/apis/meta/v1" //ms: adding
-	
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -149,7 +147,7 @@ func main() {
 	//ms: adding informer
 	informerMgr := genericmanager.NewGenericManager()
 
-	if err = (&controller.PVSyncReconciler{
+	if err = (&controller.PVSyncController{
 		Client:                  mgr.GetClient(),
 		InformerManager:         informerMgr, //ms: adding
 		StopChan:                ctrl.SetupSignalHandler(), //ms: adding

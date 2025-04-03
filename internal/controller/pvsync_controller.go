@@ -19,14 +19,14 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
-	"strings"
-	"sync"
+	//"reflect"
+	//"strings"
+	//"sync"
 
-    corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
+    	corev1 "k8s.io/api/core/v1"
+	//discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	//"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -67,6 +67,15 @@ const PVSyncControllerName = "pv-sync-controller"
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/finalizers,verbs=update
+
+type PVSyncController struct {
+	client.Client
+	Scheme             *runtime.Scheme
+	WorkerNumber       int
+	StopChan           <-chan struct{}
+	PredicateFunc      predicate.Predicate
+	RateLimiterOptions ratelimiterflag.Options
+}
 
 //ms: Refer to the reconcile code of endpointsliceCollectController
 //ms: mainly referenced the overall part

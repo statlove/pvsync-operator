@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/statlove/PVSyncController/test/utils"
+	"github.com/statlove/pvsync-operator/test/utils"
 )
 
 const namespace = "pv-sync-controller-system"

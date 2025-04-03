@@ -1,4 +1,4 @@
-module github.com/statlove/PVSyncController
+module github.com/statlove/pvsync-operator
 
 go 1.22.12
 

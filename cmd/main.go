@@ -20,7 +20,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	pvcontroller "github.com/statlove/pvsync-operator/controllers" //ms: adding
+	pvcontroller "github.com/statlove/pvsync-operator/internal/controller" //ms: adding
 	"github.com/karmada-io/karmada/pkg/util/fedinformer/genericmanager" //ms: adding
 	"k8s.io/apimachinery/pkg/apis/meta/v1" //ms: adding
 	
@@ -38,7 +38,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"github.com/statlove/PVSyncController/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

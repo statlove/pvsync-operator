@@ -5,28 +5,21 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - dcn.dcn.karmada.io
+  - ""
   resources:
-  - pvsyncs
+  - persistentvolumes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - work.karmada.io
+  resources:
+  - works
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
   - update
   - watch
-- apiGroups:
-  - dcn.dcn.karmada.io
-  resources:
-  - pvsyncs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - dcn.dcn.karmada.io
-  resources:
-  - pvsyncs/status
-  verbs:
-  - get
-  - patch
-  - update

@@ -19,7 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
-
+	//"reflect"
+	//"strings"
+	//"sync"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -53,7 +55,11 @@ var (
 
 const PVSyncControllerName = "pv-sync-controller"
 
-// PVSyncController is the controller for syncing PV information from member clusters
+// +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=dcn.dcn.karmada.io,resources=pvsyncs/finalizers,verbs=update
+
+// ms: add controller structure
 type PVSyncController struct {
 	client.Client
 	Scheme             *runtime.Scheme
@@ -61,15 +67,17 @@ type PVSyncController struct {
 	StopChan           <-chan struct{}
 	PredicateFunc      predicate.Predicate
 	RateLimiterOptions ratelimiterflag.Options
-	worker             util.AsyncWorker
-	ClusterClientFunc  func(clusterName string, controlPlaneClient client.Client) (client.Client, error)
+	worker             util.AsyncWorker                                                                  //ms: modify
+	ClusterClientFunc  func(clusterName string, controlPlaneClient client.Client) (client.Client, error) //ms: 5th modify
 }
 
-// Reconcile performs a full reconciliation for the object referred to by the Request.
+// ms: Refer to the reconcile code of endpointsliceCollectController
+// ms: mainly referenced the overall part
+// ms: The parts that have been changed in detail are the part that checks GVK within the work, the part that creates and registers informers, and the logic that collects PV information.
 func (c *PVSyncController) Reconcile(ctx context.Context, req controllerruntime.Request) (controllerruntime.Result, error) {
 	klog.V(4).Infof("Reconciling Work %s", req.NamespacedName.String())
 
-	work := &workv1alpha1.Work{}
+	work := &workv1alpha1.Work{} //ms: Preserve the part that searches the cluster for the work resource where the current event occurred
 	if err := c.Client.Get(ctx, req.NamespacedName, work); err != nil {
 		if apierrors.IsNotFound(err) {
 			return controllerruntime.Result{}, nil
@@ -77,31 +85,34 @@ func (c *PVSyncController) Reconcile(ctx context.Context, req controllerruntime.
 		return controllerruntime.Result{}, err
 	}
 
-	if !helper.IsWorkContains(work.Spec.Workload.Manifests, StatefulSetGVK) {
+	if !helper.IsWorkContains(work.Spec.Workload.Manifests, StatefulSetGVK) { //ms: fixed part to check if GVK includes the corresponding resource
 		return controllerruntime.Result{}, nil
 	}
 
 	if !work.DeletionTimestamp.IsZero() {
 		return controllerruntime.Result{}, nil
 	}
-
-	clusterName, err := names.GetClusterName(work.Namespace)
+	//ms: 3rd modify, about func call
+	clusterName, err := names.GetClusterName(work.Namespace) //ms: save this code because of we can get the name cluster where sts was deployed from this code
 	if err != nil {
 		klog.Errorf("Failed to get cluster name for work %s/%s", work.Namespace, work.Name)
 		return controllerruntime.Result{}, err
 	}
-
+	//ms: 4th modify, worker start
 	c.worker.Enqueue(keys.FederatedKey{
 		Cluster: clusterName,
 	})
-
+	//ms: 4th modify, delete
+	//if err = c.collectPersistentVolumesByCluster(clusterName); err != nil {
+	//	return controllerruntime.Result{}, err
+	//}
 	return controllerruntime.Result{}, nil
 }
 
 // SetupWithManager creates a controller and register to controller manager.
 func (c *PVSyncController) SetupWithManager(mgr controllerruntime.Manager) error {
 	return controllerruntime.NewControllerManagedBy(mgr).
-		Named(PVSyncControllerName).
+		Named(PVSyncControllerName). //ms: change controller name
 		For(&workv1alpha1.Work{}, builder.WithPredicates(c.PredicateFunc)).
 		WithOptions(controller.Options{RateLimiter: ratelimiterflag.DefaultControllerRateLimiter[controllerruntime.Request](c.RateLimiterOptions)}).
 		Complete(c)
@@ -110,15 +121,15 @@ func (c *PVSyncController) SetupWithManager(mgr controllerruntime.Manager) error
 // RunWorkQueue initializes worker and run it, worker will process resource asynchronously.
 func (c *PVSyncController) RunWorkQueue() {
 	workerOptions := util.Options{
-		Name:          "persistentvolume-collect",
+		Name:          "persistentvolume-collect", //ms: change worker name
 		KeyFunc:       nil,
-		ReconcileFunc: c.collectPersistentVolume,
+		ReconcileFunc: c.collectPersistentVolume, //ms: using collectPersistentVolume function
 	}
 	c.worker = util.NewAsyncWorker(workerOptions)
 	c.worker.Run(c.WorkerNumber, c.StopChan)
 }
 
-// collectPersistentVolume collects PersistentVolume information from member clusters
+// ms: 5th modify, modify collectPersistentVolume function
 func (c *PVSyncController) collectPersistentVolume(key util.QueueKey) error {
 	ctx := context.Background()
 
@@ -127,69 +138,38 @@ func (c *PVSyncController) collectPersistentVolume(key util.QueueKey) error {
 		return fmt.Errorf("invalid key type: %v", key)
 	}
 	clusterName := fedKey.Cluster
-	klog.V(4).Infof("Collecting PersistentVolumes from cluster %s", clusterName)
 
-	// Get client for the member cluster
 	clusterClient, err := c.ClusterClientFunc(clusterName, c.Client)
 	if err != nil {
 		klog.Errorf("Failed to get client for cluster %s: %v", clusterName, err)
 		return err
 	}
 
-	// List StatefulSets in the member cluster
 	stsList := &appsv1.StatefulSetList{}
 	if err := clusterClient.List(ctx, stsList); err != nil {
 		klog.Errorf("Failed to list StatefulSets in cluster %s: %v", clusterName, err)
 		return err
 	}
 
-	// Process each StatefulSet
 	for _, sts := range stsList.Items {
-		if len(sts.Spec.VolumeClaimTemplates) == 0 {
-			continue
-		}
-
-		// Get PVCs for this StatefulSet
-		for _, template := range sts.Spec.VolumeClaimTemplates {
-			// StatefulSet PVCs follow the naming convention: <volume-name>-<statefulset-name>-<ordinal>
-			// List all PVCs in the StatefulSet's namespace that match this pattern
+		for range sts.Spec.VolumeClaimTemplates {
 			pvcList := &corev1.PersistentVolumeClaimList{}
 			if err := clusterClient.List(ctx, pvcList, client.InNamespace(sts.Namespace)); err != nil {
-				klog.Errorf("Failed to list PVCs in namespace %s: %v", sts.Namespace, err)
 				continue
 			}
 
-			// Filter PVCs that belong to this StatefulSet's VolumeClaimTemplate
 			for _, pvc := range pvcList.Items {
-				// Skip PVCs that don't have a volume name assigned
 				if pvc.Spec.VolumeName == "" {
 					continue
 				}
 
-				// Check if this PVC belongs to our StatefulSet
-				// A simple check would be to see if the PVC name starts with the template name and the StatefulSet name
-				if !isPVCBelongsToStatefulSet(pvc.Name, template.Name, sts.Name) {
+				var pv corev1.PersistentVolume
+				if err := clusterClient.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, &pv); err != nil {
 					continue
 				}
 
-				// Get the PV for this PVC
-				pv := &corev1.PersistentVolume{}
-				if err := clusterClient.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
-					klog.Errorf("Failed to get PV %s: %v", pvc.Spec.VolumeName, err)
-					continue
-				}
-
-				// Skip if not NFS type (for now)
-				if pv.Spec.NFS == nil {
-					klog.V(4).Infof("Skipping non-NFS PV %s", pv.Name)
-					continue
-				}
-
-				// Report this PV to the control plane
-				if err := reportPersistentVolume(ctx, c.Client, pv, clusterName); err != nil {
+				if err := reportPersistentVolume(ctx, c.Client, &pv, clusterName); err != nil {
 					klog.Warningf("Failed to report PV %s: %v", pv.Name, err)
-				} else {
-					klog.V(4).Infof("Successfully reported PV %s from cluster %s", pv.Name, clusterName)
 				}
 			}
 		}
@@ -198,34 +178,25 @@ func (c *PVSyncController) collectPersistentVolume(key util.QueueKey) error {
 	return nil
 }
 
-// isPVCBelongsToStatefulSet checks if a PVC belongs to a StatefulSet based on naming convention
-// StatefulSet PVCs follow the naming convention: <volume-name>-<statefulset-name>-<ordinal>
-func isPVCBelongsToStatefulSet(pvcName, volumeName, stsName string) bool {
-	// Simple check: PVC name should start with volumeName-stsName-
-	prefix := volumeName + "-" + stsName + "-"
-	return len(pvcName) > len(prefix) && pvcName[:len(prefix)] == prefix
-}
-
-// reportPersistentVolume reports PersistentVolume to control-plane
+// ms: reportPersistentVolume report PersistentVolume to control-plane.
 func reportPersistentVolume(ctx context.Context, c client.Client, pv *corev1.PersistentVolume, clusterName string) error {
 	executionSpace := names.GenerateExecutionSpaceName(clusterName)
-	workName := names.GenerateWorkName("PersistentVolume", pv.Name, "")
+	workName := names.GenerateWorkName("PersistentVolume", pv.Name, "") //ms: PV is cluster-scoped resource. so, no namespace.
 
-	// Convert to Unstructured
+	//ms: Convert to Unstructured -> 이 부분은 확실히 필요한지 다시 한번 확인
 	unstructuredPV, err := helper.ToUnstructured(pv)
 	if err != nil {
 		klog.Errorf("Failed to convert PersistentVolume %s to unstructured, error: %v", pv.Name, err)
 		return err
 	}
 
-	// Get metadata for work
-	workMeta, err := getPersistentVolumeWorkMeta(ctx, c, executionSpace, workName, pv)
+	workMeta, err := getPersistentVolumeWorkMeta(ctx, c, executionSpace, workName, pv) //ms: generate metadata for work
 	if err != nil {
 		return err
 	}
 
-	// Create or update work
-	if err := ctrlutil.CreateOrUpdateWork(ctx, c, workMeta, unstructuredPV, ctrlutil.WithSuspendDispatching(true)); err != nil {
+	// indicate the Work should be not propagated since it's collected resource.
+	if err := ctrlutil.CreateOrUpdateWork(ctx, c, workMeta, unstructuredPV, ctrlutil.WithSuspendDispatching(true)); err != nil { //ms: change endpointslice to pv
 		klog.Errorf("Failed to create or update work(%s/%s), Error: %v", workMeta.Namespace, workMeta.Name, err)
 		return err
 	}
@@ -233,7 +204,7 @@ func reportPersistentVolume(ctx context.Context, c client.Client, pv *corev1.Per
 	return nil
 }
 
-// getPersistentVolumeWorkMeta creates metadata for the work resource
+// ms: read PV info and make them into metadata that used by reportPersistentVolume to report to control-plane
 func getPersistentVolumeWorkMeta(ctx context.Context, c client.Client, ns string, workName string, pv *corev1.PersistentVolume) (metav1.ObjectMeta, error) {
 	existWork := &workv1alpha1.Work{}
 	var err error
@@ -245,31 +216,23 @@ func getPersistentVolumeWorkMeta(ctx context.Context, c client.Client, ns string
 		return metav1.ObjectMeta{}, err
 	}
 
-	// Create labels for the work resource
 	ls := map[string]string{
 		"pv.karmada.io/claim-namespace": "", // default value
 		"pv.karmada.io/claim-name":      "",
+		"pv.karmada.io/storage-class":   pv.Spec.StorageClassName,
 		"pv.karmada.io/managed-by":      "persistentvolume-collector",
 	}
 
-	// Set storage class if available
-	if pv.Spec.StorageClassName != "" {
-		ls["pv.karmada.io/storage-class"] = pv.Spec.StorageClassName
-	}
-
-	// Set claim information if available
 	if pv.Spec.ClaimRef != nil {
 		ls["pv.karmada.io/claim-namespace"] = pv.Spec.ClaimRef.Namespace
 		ls["pv.karmada.io/claim-name"] = pv.Spec.ClaimRef.Name
 	}
-
-	// Set NFS information if available
 	if pv.Spec.NFS != nil {
 		ls["pv.karmada.io/nfs-server"] = pv.Spec.NFS.Server
 		ls["pv.karmada.io/nfs-path"] = pv.Spec.NFS.Path
 	}
 
-	// If the Work resource does not exist or the label is empty, create a new one
+	//ms: If the Work resource does not exist or the label is empty, create a new one.
 	if existWork.Labels == nil || apierrors.IsNotFound(err) {
 		workMeta := metav1.ObjectMeta{
 			Name:      workName,
@@ -279,12 +242,13 @@ func getPersistentVolumeWorkMeta(ctx context.Context, c client.Client, ns string
 		return workMeta, nil
 	}
 
-	// Merge with existing labels
+	//ms: Merge with existing labels
 	ls = util.DedupeAndMergeLabels(ls, existWork.Labels)
 
 	return metav1.ObjectMeta{
-		Name:      workName,
-		Namespace: ns,
-		Labels:    ls,
+		Name:       workName,
+		Namespace:  ns,
+		Labels:     ls,
+		Finalizers: []string{"pv.karmada.io/finalizer"}, //ms: optional
 	}, nil
 }
